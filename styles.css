@@ -79,11 +79,35 @@ body {
     padding: var(--padding);
     border-bottom: 1px solid var(--border-color);
     background: var(--background-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .config-header h2 {
     font-size: 18px;
     font-weight: 600;
+    color: var(--text-color);
+}
+
+.close-sidebar-btn {
+    display: none;
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: var(--accent-color);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-sidebar-btn:hover {
+    background: var(--border-color);
     color: var(--text-color);
 }
 
@@ -771,22 +795,70 @@ body {
         --sidebar-width: 280px;
     }
     
+    /* Solidify viewport sizing across the stack */
+    html, body {
+        height: 100%;
+        min-height: 100dvh;
+        height: -webkit-fill-available;
+    }
+    
     .toggle-sidebar-btn {
         display: block;
+    }
+    
+    .close-sidebar-btn {
+        display: flex;
+    }
+    
+    .app-container {
+        height: 100vh; /* Legacy fallback */
+        height: -webkit-fill-available; /* iOS fallback */
     }
     
     .config-sidebar {
         position: fixed;
         top: 0;
         left: 0;
-        height: 100vh;
+        height: 100vh; /* Legacy fallback */
+        height: -webkit-fill-available; /* iOS fallback */
         z-index: 1000;
         box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
         background: white;
     }
     
+    /* Modern dynamic viewport units take priority */
+    @supports (height: 100dvh) {
+        .app-container {
+            height: 100dvh;
+            min-height: 100svh;
+        }
+        
+        .config-sidebar {
+            height: 100dvh;
+            min-height: 100svh;
+        }
+    }
+    
     .config-sidebar.hidden {
         transform: translateX(-100%);
+    }
+    
+    .chat-main {
+        height: 100%;
+        min-height: 0;
+    }
+    
+    .chat-messages {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+    
+    .chat-input-container {
+        position: sticky;
+        bottom: 0;
+        background: white;
+        padding-bottom: calc(var(--padding) + env(safe-area-inset-bottom));
     }
     
     .chat-header {

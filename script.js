@@ -69,6 +69,7 @@ class ChatApp {
         this.sendButton = document.getElementById('send-button');
         this.clearChatBtn = document.getElementById('clear-chat');
         this.toggleSidebarBtn = document.getElementById('toggle-sidebar');
+        this.closeSidebarBtn = document.getElementById('close-sidebar');
         this.sidebarBackdrop = document.getElementById('sidebar-backdrop');
         this.typingIndicator = document.getElementById('typing-indicator');
         this.modelInfo = document.getElementById('model-info');
@@ -186,6 +187,13 @@ class ChatApp {
                     console.log('Toggle button found on retry');
                 }
             }, 100);
+        }
+
+        // Close sidebar button
+        if (this.closeSidebarBtn) {
+            this.closeSidebarBtn.addEventListener('click', () => {
+                this.closeSidebar();
+            });
         }
         
         // Add backdrop click listener
@@ -870,24 +878,37 @@ class ChatApp {
         const sidebar = document.querySelector('.config-sidebar');
         const appContainer = document.querySelector('.app-container');
         
+        // Track the initial screen state to handle resize intelligently
+        this.lastKnownWidth = window.innerWidth;
+        this.isMobileView = window.innerWidth <= 768;
+        
         // Hide sidebar on mobile by default
-        if (window.innerWidth <= 768) {
+        if (this.isMobileView) {
             this.closeSidebar();
         }
         
-        // Handle window resize
+        // Handle window resize - only auto-close sidebar when transitioning to mobile
         window.addEventListener('resize', () => {
-            if (window.innerWidth > 768) {
-                // Desktop: show sidebar and hide backdrop
+            const currentWidth = window.innerWidth;
+            const wasDesktop = this.lastKnownWidth > 768;
+            const isNowMobile = currentWidth <= 768;
+            
+            if (wasDesktop && isNowMobile) {
+                // Transitioning from desktop to mobile - auto-close sidebar
+                this.closeSidebar();
+                this.isMobileView = true;
+            } else if (!wasDesktop && currentWidth > 768) {
+                // Transitioning from mobile to desktop - show sidebar
                 sidebar.classList.remove('hidden');
                 appContainer.classList.remove('sidebar-hidden');
                 if (this.sidebarBackdrop) {
                     this.sidebarBackdrop.style.display = 'none';
                 }
-            } else {
-                // Mobile: hide sidebar by default
-                this.closeSidebar();
+                this.isMobileView = false;
             }
+            // For mobile-to-mobile resizes (like keyboard opening), don't auto-close
+            
+            this.lastKnownWidth = currentWidth;
         });
     }
     
