@@ -16,9 +16,12 @@ class ChatApp {
         this.messages = [];
         this.isTyping = false;
         this.currentStreamingMessage = null;
+        this.botTypingElement = null;
+        this.clearChatConfirmState = false;
         
         this.initializeElements();
         this.loadConfiguration();
+        this.loadTheme();
         this.attachEventListeners();
         this.updateUI();
         this.initializeMarkdown();
@@ -85,6 +88,9 @@ class ChatApp {
         // Overlays
         this.loadingOverlay = document.getElementById('loading-overlay');
         this.toastContainer = document.getElementById('toast-container');
+        
+        // Theme toggle
+        this.darkModeToggle = document.getElementById('dark-mode-toggle');
     }
     
     loadConfiguration() {
@@ -103,6 +109,31 @@ class ChatApp {
                 this.showToast('Error loading saved configuration', 'error');
             }
         }
+    }
+    
+    loadTheme() {
+        const savedTheme = localStorage.getItem('chatapp-theme') || 'light';
+        this.setTheme(savedTheme);
+    }
+    
+    setTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('chatapp-theme', theme);
+        
+        // Update the toggle button text
+        if (this.darkModeToggle) {
+            const themeText = this.darkModeToggle.querySelector('.theme-text');
+            if (themeText) {
+                themeText.textContent = theme === 'dark' ? 'Light Mode' : 'Dark Mode';
+            }
+        }
+    }
+    
+    toggleTheme() {
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        this.setTheme(newTheme);
+        this.showToast(`Switched to ${newTheme} mode`, 'success');
     }
     
     saveConfiguration() {
@@ -164,7 +195,7 @@ class ChatApp {
         });
         
         this.clearChatBtn.addEventListener('click', () => {
-            this.clearChat();
+            this.handleClearChatClick();
         });
         
         // Debug the toggle button
@@ -213,6 +244,13 @@ class ChatApp {
                 }
             });
         });
+        
+        // Dark mode toggle
+        if (this.darkModeToggle) {
+            this.darkModeToggle.addEventListener('click', () => {
+                this.toggleTheme();
+            });
+        }
     }
     
     updateUI() {
@@ -418,6 +456,8 @@ class ChatApp {
         // Create streaming message
         this.currentStreamingMessage = this.addStreamingMessage('assistant');
         
+        let firstContentReceived = false;
+        
         try {
             while (true) {
                 const { done, value } = await reader.read();
@@ -438,6 +478,37 @@ class ChatApp {
                             
                             if (delta?.content) {
                                 const chunk = delta.content;
+                                
+                                // Hide typing indicator on first content token (not thinking content)
+                                if (!firstContentReceived) {
+                                    // Check if this chunk contains non-thinking content
+                                    let hasNonThinkingContent = false;
+                                    let tempInThinking = isInThinking;
+                                    
+                                    for (let i = 0; i < chunk.length; i++) {
+                                        if (!tempInThinking && chunk.slice(i).startsWith('<think>')) {
+                                            tempInThinking = true;
+                                            i += 6;
+                                            continue;
+                                        }
+                                        
+                                        if (tempInThinking && chunk.slice(i).startsWith('</think>')) {
+                                            tempInThinking = false;
+                                            i += 7;
+                                            continue;
+                                        }
+                                        
+                                        if (!tempInThinking) {
+                                            hasNonThinkingContent = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (hasNonThinkingContent) {
+                                        firstContentReceived = true;
+                                        this.hideBotTyping();
+                                    }
+                                }
                                 
                                 // Handle thinking tags
                                 for (let i = 0; i < chunk.length; i++) {
@@ -593,8 +664,19 @@ class ChatApp {
             this.renderMermaidDiagrams(messageText);
         }
         
+        // Update the copy button with the final content
+        const copyButton = this.currentStreamingMessage.querySelector('.copy-button');
+        if (copyButton) {
+            // Remove old event listener and add new one with updated content
+            const newCopyButton = this.createCopyButton(content);
+            copyButton.parentNode.replaceChild(newCopyButton, copyButton);
+        }
+        
         // Update metadata
         this.updateMessageMeta(this.currentStreamingMessage, meta);
+        
+        // Process images after streaming is complete
+        this.processImagesInMessage(this.currentStreamingMessage);
         
         this.currentStreamingMessage = null;
         this.scrollToBottom();
@@ -635,7 +717,7 @@ class ChatApp {
         if (!message.isStreaming) {
             this.renderMermaidDiagrams(text);
         }
-        
+
         const meta = document.createElement('div');
         meta.className = 'message-meta';
         
@@ -643,6 +725,10 @@ class ChatApp {
         
         content.appendChild(text);
         content.appendChild(meta);
+        
+        // Add copy button
+        const copyButton = this.createCopyButton(message.content);
+        content.appendChild(copyButton);
         
         messageDiv.appendChild(avatar);
         messageDiv.appendChild(content);
@@ -654,6 +740,12 @@ class ChatApp {
         }
         
         this.chatMessages.appendChild(messageDiv);
+        
+        // Process images after adding to DOM (only for non-streaming messages)
+        if (!message.isStreaming) {
+            this.processImagesInMessage(messageDiv);
+        }
+        
         return messageDiv;
     }
     
@@ -736,7 +828,160 @@ class ChatApp {
         // Fallback: simple markdown-like parsing
         return this.simpleMarkdownParse(content);
     }
-    
+
+    processImagesInMessage(messageElement) {
+        // Find all images in the message
+        const images = messageElement.querySelectorAll('img');
+        images.forEach((img, index) => {
+            // Skip if already processed
+            if (img.parentElement.classList.contains('image-container')) {
+                return;
+            }
+            
+            const container = document.createElement('div');
+            container.className = 'image-container';
+            
+            // Create download button
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'image-download-btn';
+            downloadBtn.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7,10 12,15 17,10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Download
+            `;
+            
+            // Add click handler for download
+            downloadBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.downloadImage(img.src, `image-${Date.now()}-${index + 1}`);
+            });
+            
+            // Wrap the image
+            img.parentNode.insertBefore(container, img);
+            container.appendChild(img);
+            container.appendChild(downloadBtn);
+        });
+    }
+
+    downloadImage(imageSrc, filename) {
+        try {
+            console.log('Downloading image:', imageSrc);
+            
+            // Determine file extension from URL or use default
+            let extension = '.png';
+            if (imageSrc.includes('.')) {
+                const urlParts = imageSrc.split('.');
+                const lastPart = urlParts[urlParts.length - 1].split('?')[0]; // Remove query params
+                if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(lastPart.toLowerCase())) {
+                    extension = '.' + lastPart.toLowerCase();
+                }
+            }
+            
+            const finalFilename = filename + extension;
+            
+            // Create a temporary link element for download
+            const link = document.createElement('a');
+            link.download = finalFilename;
+            
+            // For data URLs, direct download
+            if (imageSrc.startsWith('data:')) {
+                link.href = imageSrc;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                this.showToast('Image downloaded successfully', 'success');
+                return;
+            }
+            
+            // For regular URLs, try to fetch and download
+            fetch(imageSrc, {
+                mode: 'cors',
+                headers: {
+                    'Accept': 'image/*'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const blobUrl = URL.createObjectURL(blob);
+                link.href = blobUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(blobUrl);
+                this.showToast('Image downloaded successfully', 'success');
+            })
+            .catch(error => {
+                console.error('Download failed:', error);
+                this.showToast('Download failed. Opening image in new tab instead.', 'warning');
+                // Fallback: open in new tab
+                window.open(imageSrc, '_blank');
+            });
+            
+        } catch (error) {
+            console.error('Download failed:', error);
+            this.showToast('Download failed', 'error');
+            // Fallback: open in new tab
+            window.open(imageSrc, '_blank');
+        }
+    }
+
+    createCopyButton(content) {
+        const copyButton = document.createElement('button');
+        copyButton.className = 'copy-button';
+        copyButton.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+            </svg>
+        `;
+        copyButton.title = 'Copy message';
+        
+        copyButton.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            try {
+                // Copy the original content to clipboard
+                await navigator.clipboard.writeText(content);
+                
+                // Provide visual feedback
+                copyButton.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20,6 9,17 4,12"></polyline>
+                    </svg>
+                `;
+                copyButton.style.background = 'rgba(16, 163, 127, 0.2)';
+                
+                // Reset after 2 seconds
+                setTimeout(() => {
+                    copyButton.innerHTML = `
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                        </svg>
+                    `;
+                    copyButton.style.background = '';
+                }, 2000);
+                
+                this.showToast('Message copied to clipboard', 'success');
+            } catch (error) {
+                console.error('Failed to copy to clipboard:', error);
+                this.showToast('Failed to copy message', 'error');
+            }
+        });
+        
+        return copyButton;
+    }
+
     simpleMarkdownParse(content) {
         return this.escapeHtml(content)
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -819,7 +1064,40 @@ class ChatApp {
     setTyping(isTyping) {
         this.isTyping = isTyping;
         this.typingIndicator.style.display = isTyping ? 'block' : 'none';
+        if (isTyping) {
+            this.showBotTyping();
+        } else {
+            this.hideBotTyping();
+        }
         this.updateUI();
+    }
+
+    showBotTyping() {
+        this.hideBotTyping(); // Remove any existing typing indicator
+        
+        this.botTypingElement = document.createElement('div');
+        this.botTypingElement.className = 'bot-typing-message';
+        this.botTypingElement.innerHTML = `
+            <div class="message-avatar">AI</div>
+            <div class="message-content">
+                <span style="color: var(--accent-color); font-size: 13px; margin-right: 8px;">AI is thinking</span>
+                <div class="typing-dots">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            </div>
+        `;
+        
+        this.chatMessages.appendChild(this.botTypingElement);
+        this.scrollToBottom();
+    }
+
+    hideBotTyping() {
+        if (this.botTypingElement) {
+            this.botTypingElement.remove();
+            this.botTypingElement = null;
+        }
     }
     
     updateMetrics() {
@@ -841,25 +1119,56 @@ class ChatApp {
     }
     
     clearChat() {
-        if (confirm('Are you sure you want to clear the chat history?')) {
-            this.messages = [];
-            this.chatMessages.innerHTML = `
-                <div class="welcome-message">
-                    <h3>Welcome to AI Chat Assistant</h3>
-                    <p>Configure your API settings in the sidebar to start chatting.</p>
-                </div>
-            `;
+        this.messages = [];
+        this.chatMessages.innerHTML = `
+            <div class="welcome-message">
+                <h3>Welcome to AI Chat Assistant</h3>
+                <p>Configure your API settings in the sidebar to start chatting.</p>
+            </div>
+        `;
+        
+        // Reset metrics
+        this.metrics = {
+            totalTokens: 0,
+            messagesCount: 0,
+            responseTimes: [],
+            totalResponseTime: 0
+        };
+        this.updateMetrics();
+        
+        // Reset button state
+        this.clearChatConfirmState = false;
+        this.updateClearChatButton();
+        
+        this.showToast('Chat history cleared', 'success');
+    }
+    
+    handleClearChatClick() {
+        if (!this.clearChatConfirmState) {
+            // First click - ask for confirmation
+            this.clearChatConfirmState = true;
+            this.updateClearChatButton();
             
-            // Reset metrics
-            this.metrics = {
-                totalTokens: 0,
-                messagesCount: 0,
-                responseTimes: [],
-                totalResponseTime: 0
-            };
-            this.updateMetrics();
-            
-            this.showToast('Chat history cleared', 'success');
+            // Reset state after 3 seconds if user doesn't click again
+            setTimeout(() => {
+                if (this.clearChatConfirmState) {
+                    this.clearChatConfirmState = false;
+                    this.updateClearChatButton();
+                }
+            }, 3000);
+        } else {
+            // Second click - perform the clear
+            this.clearChat();
+        }
+    }
+    
+    updateClearChatButton() {
+        if (this.clearChatConfirmState) {
+            this.clearChatBtn.textContent = 'Click to Confirm';
+            this.clearChatBtn.classList.add('confirm-state');
+        } else {
+            this.clearChatBtn.textContent = 'Clear Chat';
+            this.clearChatBtn.classList.remove('confirm-state');
         }
     }
     
