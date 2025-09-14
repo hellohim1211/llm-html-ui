@@ -4,7 +4,7 @@ A simple, responsive web-based chat interface for interacting with OpenAI-compat
 
 ## Live Demo
 
-🚀 **[Try it live](https://ai-chat.vibeweb.site){:target="_blank"}**
+🚀 **<a href="https://ai-chat.vibeweb.site" target="_blank">Try it live</a>**
 
 ## Screenshots
 
